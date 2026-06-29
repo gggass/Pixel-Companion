@@ -139,9 +139,65 @@ class ParticleOverlay(QWidget):
             pass
 
 
+# --- 按键显示面板（浮动在宠物左边） --- #
+class KeyPanel(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setFixedWidth(120)
+
+        self._entries = []  # [(QLabel, QTimer), ...]
+        self._max_entries = 5
+
+    def add_key(self, text):
+        label = QLabel(text, self)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet(
+            "color: white; background-color: rgba(0,0,0,160);"
+            "border-radius: 4px; padding: 3px 6px;"
+        )
+        label.setFont(QFont("Arial", 10, QFont.Bold))
+        label.adjustSize()
+        label.show()
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+
+        self._entries.insert(0, (label, timer))
+        while len(self._entries) > self._max_entries:
+            old_label, old_timer = self._entries.pop()
+            old_timer.stop()
+            old_label.deleteLater()
+
+        self._relayout()
+
+        def remove():
+            if (label, timer) in self._entries:
+                self._entries.remove((label, timer))
+                label.deleteLater()
+                self._relayout()
+        timer.timeout.connect(remove)
+        timer.start(KEY_DISPLAY_DURATION)
+
+    def _relayout(self):
+        y = 4
+        for label, _ in self._entries:
+            label.adjustSize()
+            label.move((self.width() - label.width()) // 2, y)
+            y += label.height() + 3
+        self.setFixedHeight(y + 4)
+
+    def anchor_to(self, pet_global_pos):
+        """定位在宠物左边"""
+        self.move(pet_global_pos.x() - self.width() - 8, pet_global_pos.y())
+
+
 # --- 宠物窗口 --- #
 class PetWindow(QWidget):
     menu_requested = pyqtSignal(QPoint)
+    moved = pyqtSignal(QPoint)  # 位置变化 → 通知 KeyPanel 跟随
 
     def __init__(self):
         super().__init__()
@@ -160,55 +216,7 @@ class PetWindow(QWidget):
             pix = pix.scaled(PET_SIZE, PET_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._pixmap = pix
 
-        # 按键队列：每个按键一个独立标签，堆叠在宠物上方
-        self._key_labels = []  # [(QLabel, QTimer), ...]
         self._drag_pos = None
-
-    def show_key(self, text):
-        """添加按键到队列顶部，旧键下移，到时自动消失"""
-        label = QLabel(text, self)
-        label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet(
-            "background-color: rgba(0,0,0,180); color: white; border-radius: 5px; padding: 5px;"
-        )
-        label.setFont(QFont("Arial", 10, QFont.Bold))
-        label.adjustSize()
-        label.show()
-
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-
-        entry = (label, timer)
-        self._key_labels.insert(0, entry)  # 新键插入顶部
-
-        # 限制队列长度
-        while len(self._key_labels) > 5:
-            old_label, old_timer = self._key_labels.pop()
-            old_timer.stop()
-            old_label.deleteLater()
-
-        self._layout_key_labels()
-
-        # 定时移除
-        def remove():
-            if entry in self._key_labels:
-                self._key_labels.remove(entry)
-                label.deleteLater()
-                self._layout_key_labels()
-        timer.timeout.connect(remove)
-        timer.start(KEY_DISPLAY_DURATION)
-
-    def _layout_key_labels(self):
-        """从下到上排列所有按键标签（在窗口内部）"""
-        y_offset = PET_SIZE - 10
-        for label, _ in reversed(self._key_labels):
-            label.adjustSize()
-            y_offset -= label.height()
-            label.move(
-                (PET_SIZE - label.width()) // 2,
-                y_offset,
-            )
-            y_offset -= 4
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -226,6 +234,7 @@ class PetWindow(QWidget):
             d = e.globalPos() - self._drag_pos
             self.move(self.pos() + d)
             self._drag_pos = e.globalPos()
+            self.moved.emit(self.pos())
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self._drag_pos is not None:
@@ -240,19 +249,26 @@ class Controller:
     def __init__(self):
         self.overlay = ParticleOverlay()
         self.pet = PetWindow()
+        self.key_panel = KeyPanel()
 
         self.pet.menu_requested.connect(self._show_menu)
+        self.pet.moved.connect(self.key_panel.anchor_to)
+        self.pet.moved.connect(self._on_pet_moved)
+
+        self._pet_pos = self.pet.pos()
 
         self.hook = HookListener()
-        self.hook.key_signal.connect(self.pet.show_key)
+        self.hook.key_signal.connect(self.key_panel.add_key)
         self.hook.move_signal.connect(self.overlay.add)
         self.hook.start()
 
         app = QApplication.instance()
         app.aboutToQuit.connect(self._cleanup)
 
+    def _on_pet_moved(self, pos):
+        self._pet_pos = pos
+
     def _show_menu(self, pos):
-        # 菜单弹出时暂时隐藏覆盖层，确保菜单不被遮挡
         overlay_was_visible = self.overlay.isVisible()
         if overlay_was_visible:
             self.overlay.hide()
@@ -273,7 +289,7 @@ class Controller:
     def _toggle(self):
         self.overlay.enabled = not self.overlay.enabled
         s = "ON" if self.overlay.enabled else "OFF"
-        self.pet.show_key(f"Particles: {s}")
+        self.key_panel.add_key(f"Particles: {s}")
 
     def _cleanup(self):
         self.hook.stop()
@@ -283,6 +299,8 @@ class Controller:
         self.overlay.show()
         self.pet.show()
         self.pet.raise_()
+        self.key_panel.anchor_to(self.pet.pos())
+        self.key_panel.show()
 
 
 if __name__ == "__main__":
