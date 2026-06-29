@@ -118,8 +118,7 @@ std::string GetKeyName(DWORD vkCode) {
             }
             // 如果无法转换为字符，则返回虚拟键码的十六进制表示
             std::stringstream ss;
-            ss << 
-0x" << std::hex << vkCode;
+            ss << "0x" << std::hex << vkCode;
             return ss.str();
         }
     }
