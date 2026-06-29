@@ -191,6 +191,8 @@ class PixelCompanion(QWidget):
     # ---------- 鼠标事件（来自 Hook） ----------
     def handle_mouse_event(self, event_type, x, y):
         if event_type == "mouse_move":
+            needs_update = False
+
             # 粒子拖尾：x, y 是屏幕坐标，窗口全屏 → 坐标直接可用
             if self.mouse_effect_enabled:
                 for _ in range(random.randint(1, 3)):
@@ -202,7 +204,7 @@ class PixelCompanion(QWidget):
                     self.particles.append(Particle(x, y, color))
                 while len(self.particles) > 100:
                     self.particles.popleft()
-                self.update()
+                needs_update = True
 
             # 拖拽更新
             if self.dragging:
@@ -210,6 +212,10 @@ class PixelCompanion(QWidget):
                     x - self.drag_offset.x(), y - self.drag_offset.y()
                 )
                 self._reposition_key_label()
+                needs_update = True
+
+            if needs_update:
+                self.update()
 
         elif event_type == "mouse_left_down":
             if self.pet_rect().contains(x, y):
