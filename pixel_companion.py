@@ -171,6 +171,7 @@ class PetWindow(QWidget):
         self._key_timer.timeout.connect(self._key_label.hide)
 
         self._drag_pos = None
+        self._clicked = False
 
     def show_key(self, text):
         self._key_label.setText(text)
@@ -186,9 +187,13 @@ class PetWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.drawPixmap(0, 0, self._pixmap)
+        if self._clicked:
+            p.fillRect(0, 0, PET_SIZE, PET_SIZE, QColor(255, 255, 0, 100))
 
     def mousePressEvent(self, e):
-        self.show_key("click")  # debug: 确认收到点击
+        # 用背景色变化做反馈（标签可能被裁剪）
+        self._clicked = True
+        self.update()
         if e.button() == Qt.LeftButton:
             self._drag_pos = e.globalPos()
         elif e.button() == Qt.RightButton:
@@ -201,6 +206,8 @@ class PetWindow(QWidget):
             self._drag_pos = e.globalPos()
 
     def mouseReleaseEvent(self, e):
+        self._clicked = False
+        self.update()
         if e.button() == Qt.LeftButton and self._drag_pos is not None:
             d = e.globalPos() - self._drag_pos
             if d.manhattanLength() < 5:
@@ -244,11 +251,9 @@ class Controller:
         self.hook.wait()
 
     def show(self):
-        self.overlay.show()
+        # DEBUG: 暂时关闭覆盖层，单独测试宠物窗口
+        # self.overlay.show()
         self.pet.show()
-        # 确保宠物窗口在粒子覆盖层之上
-        self.pet.raise_()
-        self.pet.activateWindow()
 
 
 if __name__ == "__main__":
