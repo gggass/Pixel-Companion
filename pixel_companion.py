@@ -11,7 +11,9 @@ from PyQt5.QtGui import QPixmap, QColor, QPainter, QFont, QBrush
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSize, QThread, pyqtSignal
 
 # --- 配置 --- #
-PET_IMAGE_PATH = "./assets/pixel_pet.png"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PET_IMAGE_PATH = os.path.join(BASE_DIR, "assets", "pixel_pet.png")
+HOOK_EXE_PATH = os.path.join(BASE_DIR, "hook_core.exe")
 KEY_DISPLAY_DURATION = 1500  # 按键显示时长 (毫秒)
 PET_SIZE = 128  # 宠物图片大小
 
@@ -54,7 +56,7 @@ class HookListener(QThread):
     def run(self):
         try:
             self.process = subprocess.Popen(
-                ["./hook_core.exe"],
+                [HOOK_EXE_PATH],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -297,7 +299,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     # 确保 assets 目录和占位符图片存在
-    os.makedirs("./assets", exist_ok=True)
+    os.makedirs(os.path.join(BASE_DIR, "assets"), exist_ok=True)
     if not os.path.exists(PET_IMAGE_PATH):
         placeholder = QPixmap(PET_SIZE, PET_SIZE)
         placeholder.fill(QColor("red"))
