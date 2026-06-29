@@ -6,7 +6,7 @@ import os
 import ctypes
 from collections import deque
 
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMenu, QAction
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMenu
 from PyQt5.QtGui import QPixmap, QColor, QPainter, QFont, QBrush
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSize, QThread, pyqtSignal
 
@@ -14,11 +14,11 @@ from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSize, QThread, pyqtSignal
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PET_IMAGE_PATH = os.path.join(BASE_DIR, "assets", "pixel_pet.png")
 HOOK_EXE_PATH = os.path.join(BASE_DIR, "hook_core.exe")
-KEY_DISPLAY_DURATION = 1500  # 按键显示时长 (毫秒)
-PET_SIZE = 128  # 宠物图片大小
+KEY_DISPLAY_DURATION = 1500
+PET_SIZE = 128
 
 
-# --- 鼠标粒子效果类 --- #
+# --- 粒子 --- #
 class Particle:
     def __init__(self, x, y, color):
         self.x = x
@@ -31,22 +31,20 @@ class Particle:
     def update(self):
         self.x += self.vx
         self.y += self.vy
-        self.alpha -= 5  # 逐渐消失
+        self.alpha -= 5
 
     def draw(self, painter):
         if self.alpha > 0:
-            color = QColor(
-                self.color.red(), self.color.green(), self.color.blue(), self.alpha
-            )
-            painter.setBrush(QBrush(color))
+            c = QColor(self.color.red(), self.color.green(), self.color.blue(), self.alpha)
+            painter.setBrush(QBrush(c))
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(int(self.x), int(self.y), 5, 5)
 
 
-# --- C++ Hook Core 监听线程 --- #
+# --- Hook 线程 --- #
 class HookListener(QThread):
-    key_event_signal = pyqtSignal(str)
-    mouse_event_signal = pyqtSignal(str, int, int)
+    key_signal = pyqtSignal(str)
+    move_signal = pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,41 +55,29 @@ class HookListener(QThread):
         try:
             self.process = subprocess.Popen(
                 [HOOK_EXE_PATH],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, universal_newlines=True,
             )
-
-            # 预热输出：跳过初始化 JSON
             self.process.stdout.readline()
-
             for line in self.process.stdout:
                 if not self.running:
                     break
                 try:
                     data = json.loads(line)
-                    event_type = data.get("event_type")
-                    if event_type == "key_down":
-                        key = data.get("key", "Unknown")
-                        self.key_event_signal.emit(key)
-                    elif event_type and event_type.startswith("mouse_"):
-                        x = data.get("x", 0)
-                        y = data.get("y", 0)
-                        self.mouse_event_signal.emit(event_type, x, y)
-                except json.JSONDecodeError:
-                    print(f"Error decoding JSON: {line.strip()}")
-                except Exception as e:
-                    print(f"Error processing event: {e}")
+                    t = data.get("event_type")
+                    if t == "key_down":
+                        self.key_signal.emit(data.get("key", "?"))
+                    elif t == "mouse_move":
+                        self.move_signal.emit(data.get("x", 0), data.get("y", 0))
+                except Exception:
+                    pass
         except FileNotFoundError:
-            print("Error: hook_core.exe not found. Please compile it first.")
+            print("hook_core.exe not found")
         except Exception as e:
-            print(f"Error starting hook_core: {e}")
+            print(f"Hook error: {e}")
         finally:
             if self.process and self.process.poll() is None:
                 self.process.terminate()
-            print("Hook Listener stopped.")
 
     def stop(self):
         self.running = False
@@ -100,167 +86,31 @@ class HookListener(QThread):
             self.process.wait()
 
 
-# --- 主窗口类（全屏透明覆盖层） --- #
-class PixelCompanion(QWidget):
+# --- 粒子全屏覆盖层（纯显示） --- #
+class ParticleOverlay(QWidget):
     def __init__(self):
         super().__init__()
-
-        # 全屏透明覆盖层：不拦截鼠标事件，所有交互通过全局钩子
-        self.setWindowFlags(
-            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
-        )
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        # 先用 Qt 属性，showEvent 里再用 Win32 API 加固
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setGeometry(QApplication.desktop().availableGeometry())
 
-        screen = QApplication.desktop().availableGeometry()
-        self.setGeometry(screen)
-        self._click_through_set = False
-
-        # 加载宠物图片
-        self.pet_pixmap = QPixmap(PET_IMAGE_PATH)
-        if self.pet_pixmap.isNull():
-            print(f"Error: Could not load pet image from {PET_IMAGE_PATH}")
-            self.pet_pixmap = QPixmap(PET_SIZE, PET_SIZE)
-            self.pet_pixmap.fill(QColor("red"))
-        else:
-            self.pet_pixmap = self.pet_pixmap.scaled(
-                PET_SIZE, PET_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-
-        # 宠物在全屏窗口中的位置（初始：右下角）
-        self.pet_pos = QPoint(
-            screen.width() - PET_SIZE - 20, screen.height() - PET_SIZE - 40
-        )
-
-        # 按键显示标签
-        self.key_display_label = QLabel(self)
-        self.key_display_label.setAlignment(Qt.AlignCenter)
-        self.key_display_label.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 180); color: white;"
-            "border-radius: 5px; padding: 5px;"
-        )
-        self.key_display_label.setFont(QFont("Arial", 10, QFont.Bold))
-        self.key_display_label.hide()
-        self.key_display_timer = QTimer(self)
-        self.key_display_timer.timeout.connect(self.hide_key_display)
-
-        # 粒子系统
         self.particles = deque()
-        self.mouse_effect_enabled = True
-        self.mouse_effect_timer = QTimer(self)
-        self.mouse_effect_timer.timeout.connect(self.update_particles)
-        self.mouse_effect_timer.start(30)  # 每 30ms 更新粒子
+        self.enabled = True
 
-        # 拖动状态
-        self.dragging = False
-        self.drag_offset = QPoint()
-        self.drag_start_pos = QPoint()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(30)
 
-        # 启动 Hook 监听线程
-        self.hook_listener = HookListener()
-        self.hook_listener.key_event_signal.connect(self.show_key_on_pet)
-        self.hook_listener.mouse_event_signal.connect(self.handle_mouse_event)
-        self.hook_listener.start()
+    def add(self, x, y):
+        if not self.enabled:
+            return
+        c = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        self.particles.append(Particle(x, y, c))
+        while len(self.particles) > 100:
+            self.particles.popleft()
 
-    def pet_rect(self):
-        """返回宠物在窗口中的矩形区域"""
-        return QRect(self.pet_pos, QSize(PET_SIZE, PET_SIZE))
-
-    # ---------- 按键显示 ----------
-    def show_key_on_pet(self, key_name):
-        self.key_display_label.setText(key_name)
-        self.key_display_label.adjustSize()
-        self._reposition_key_label()
-        self.key_display_label.show()
-        self.key_display_timer.start(KEY_DISPLAY_DURATION)
-
-    def hide_key_display(self):
-        self.key_display_label.hide()
-        self.key_display_timer.stop()
-
-    def _reposition_key_label(self):
-        """将按键标签放在宠物上方"""
-        lw = self.key_display_label.width()
-        lh = self.key_display_label.height()
-        self.key_display_label.move(
-            self.pet_pos.x() + (PET_SIZE - lw) // 2,
-            self.pet_pos.y() - lh - 10,
-        )
-
-    # ---------- 鼠标事件（来自 Hook） ----------
-    def handle_mouse_event(self, event_type, x, y):
-        if event_type == "mouse_move":
-            needs_update = False
-
-            # 粒子拖尾：x, y 是屏幕坐标，窗口全屏 → 坐标直接可用
-            if self.mouse_effect_enabled:
-                for _ in range(random.randint(1, 3)):
-                    color = QColor(
-                        random.randint(0, 255),
-                        random.randint(0, 255),
-                        random.randint(0, 255),
-                    )
-                    self.particles.append(Particle(x, y, color))
-                while len(self.particles) > 100:
-                    self.particles.popleft()
-                needs_update = True
-
-            # 拖拽更新
-            if self.dragging:
-                self.pet_pos = QPoint(
-                    x - self.drag_offset.x(), y - self.drag_offset.y()
-                )
-                self._reposition_key_label()
-                needs_update = True
-
-            if needs_update:
-                self.update()
-
-        elif event_type == "mouse_left_down":
-            if self.pet_rect().contains(x, y):
-                self.dragging = True
-                self.drag_offset = QPoint(
-                    x - self.pet_pos.x(), y - self.pet_pos.y()
-                )
-                self.drag_start_pos = QPoint(x, y)
-
-        elif event_type == "mouse_left_up":
-            if self.dragging:
-                # 几乎没有移动 → 视为点击，切换粒子特效
-                dx = x - self.drag_start_pos.x()
-                dy = y - self.drag_start_pos.y()
-                if (dx * dx + dy * dy) < 25:  # 移动距离 < 5px
-                    self._show_menu(QPoint(x, y))
-                self.dragging = False
-                self.drag_start_pos = QPoint()
-
-        elif event_type == "mouse_right_down":
-            if self.pet_rect().contains(x, y):
-                self._show_menu(QPoint(x, y))
-
-    def _show_menu(self, pos):
-        """点击宠物弹出菜单"""
-        menu = QMenu()
-
-        if self.mouse_effect_enabled:
-            menu.addAction("Pause Particles", self._toggle_particles)
-        else:
-            menu.addAction("Resume Particles", self._toggle_particles)
-
-        menu.addSeparator()
-        menu.addAction("Exit", self.close)
-
-        menu.popup(pos)
-
-    def _toggle_particles(self):
-        self.mouse_effect_enabled = not self.mouse_effect_enabled
-        status = "ON" if self.mouse_effect_enabled else "OFF"
-        self.show_key_on_pet(f"Particles: {status}")
-
-    # ---------- 粒子更新 ----------
-    def update_particles(self):
-        """始终让粒子淡出消失，开关只控制新粒子创建"""
+    def _tick(self):
         if not self.particles:
             return
         for p in list(self.particles):
@@ -269,69 +119,143 @@ class PixelCompanion(QWidget):
                 self.particles.remove(p)
         self.update()
 
-    # ---------- 绘制 ----------
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # 鼠标粒子
-        for p in self.particles:
-            p.draw(painter)
-
-        # 宠物
-        painter.drawPixmap(self.pet_pos.x(), self.pet_pos.y(), self.pet_pixmap)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        for pt in self.particles:
+            pt.draw(p)
 
     def showEvent(self, event):
-        """窗口显示后，通过 Win32 API 强制设置鼠标穿透"""
         super().showEvent(event)
-        if not self._click_through_set:
-            self._enable_click_through()
-
-    def _enable_click_through(self):
-        """用 Win32 SetWindowLongPtr 设置 WS_EX_TRANSPARENT，比 Qt 属性更可靠"""
         try:
             hwnd = int(self.winId())
-            GWL_EXSTYLE = -20
-            WS_EX_TRANSPARENT = 0x00000020
-            WS_EX_LAYERED = 0x00080000
-            WS_EX_TOOLWINDOW = 0x00000080
-            WS_EX_TOPMOST = 0x00000008
+            WS_EX_TRANSPARENT = 0x20
+            WS_EX_LAYERED = 0x80000
+            u = ctypes.windll.user32
+            ex = u.GetWindowLongPtrW(hwnd, -20) | WS_EX_TRANSPARENT | WS_EX_LAYERED
+            u.SetWindowLongPtrW(hwnd, -20, ex)
+            u.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0020 | 0x0002 | 0x0001 | 0x0004)
+        except Exception:
+            pass
 
-            user32 = ctypes.windll.user32
-            ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
-            ex_style |= WS_EX_TRANSPARENT | WS_EX_LAYERED
-            user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style)
-            # 刷新窗口框架使样式生效
-            SWP_FRAMECHANGED = 0x0020
-            SWP_NOMOVE = 0x0002
-            SWP_NOSIZE = 0x0001
-            SWP_NOZORDER = 0x0004
-            ctypes.windll.user32.SetWindowPos(
-                hwnd, 0, 0, 0, 0, 0,
-                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
-            )
-            self._click_through_set = True
-        except Exception as e:
-            print(f"Failed to enable click-through: {e}")
 
-    # ---------- 退出 ----------
-    def closeEvent(self, event):
-        self.hook_listener.stop()
-        self.hook_listener.wait()
-        super().closeEvent(event)
+# --- 宠物窗口 --- #
+class PetWindow(QWidget):
+    menu_requested = pyqtSignal(QPoint)
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(PET_SIZE, PET_SIZE)
+
+        screen = QApplication.desktop().availableGeometry()
+        self.move(screen.width() - PET_SIZE - 20, screen.height() - PET_SIZE - 40)
+
+        pix = QPixmap(PET_IMAGE_PATH)
+        if pix.isNull():
+            pix = QPixmap(PET_SIZE, PET_SIZE)
+            pix.fill(QColor("red"))
+        else:
+            pix = pix.scaled(PET_SIZE, PET_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._pixmap = pix
+
+        self._key_label = QLabel(self)
+        self._key_label.setAlignment(Qt.AlignCenter)
+        self._key_label.setStyleSheet(
+            "background-color: rgba(0,0,0,180); color: white; border-radius: 5px; padding: 5px;"
+        )
+        self._key_label.setFont(QFont("Arial", 10, QFont.Bold))
+        self._key_label.hide()
+        self._key_timer = QTimer(self)
+        self._key_timer.timeout.connect(self._key_label.hide)
+
+        self._drag_pos = None
+
+    def show_key(self, text):
+        self._key_label.setText(text)
+        self._key_label.adjustSize()
+        self._key_label.move(
+            (PET_SIZE - self._key_label.width()) // 2,
+            -self._key_label.height() - 10,
+        )
+        self._key_label.show()
+        self._key_timer.start(KEY_DISPLAY_DURATION)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.drawPixmap(0, 0, self._pixmap)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_pos = e.globalPos()
+        elif e.button() == Qt.RightButton:
+            self.menu_requested.emit(e.globalPos())
+
+    def mouseMoveEvent(self, e):
+        if self._drag_pos is not None:
+            d = e.globalPos() - self._drag_pos
+            self.move(self.pos() + d)
+            self._drag_pos = e.globalPos()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._drag_pos is not None:
+            d = e.globalPos() - self._drag_pos
+            if d.manhattanLength() < 5:
+                self.menu_requested.emit(e.globalPos())
+            self._drag_pos = None
+
+
+# --- 控制器 --- #
+class Controller:
+    def __init__(self):
+        self.overlay = ParticleOverlay()
+        self.pet = PetWindow()
+
+        self.pet.menu_requested.connect(self._show_menu)
+
+        self.hook = HookListener()
+        self.hook.key_signal.connect(self.pet.show_key)
+        self.hook.move_signal.connect(self.overlay.add)
+        self.hook.start()
+
+        app = QApplication.instance()
+        app.aboutToQuit.connect(self._cleanup)
+
+    def _show_menu(self, pos):
+        menu = QMenu()
+        if self.overlay.enabled:
+            menu.addAction("Pause Particles", self._toggle)
+        else:
+            menu.addAction("Resume Particles", self._toggle)
+        menu.addSeparator()
+        menu.addAction("Exit", QApplication.quit)
+        menu.popup(pos)
+
+    def _toggle(self):
+        self.overlay.enabled = not self.overlay.enabled
+        s = "ON" if self.overlay.enabled else "OFF"
+        self.pet.show_key(f"Particles: {s}")
+
+    def _cleanup(self):
+        self.hook.stop()
+        self.hook.wait()
+
+    def show(self):
+        self.overlay.show()
+        self.pet.show()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # 确保 assets 目录和占位符图片存在
     os.makedirs(os.path.join(BASE_DIR, "assets"), exist_ok=True)
     if not os.path.exists(PET_IMAGE_PATH):
-        placeholder = QPixmap(PET_SIZE, PET_SIZE)
-        placeholder.fill(QColor("red"))
-        placeholder.save(PET_IMAGE_PATH)
-        print(f"Created placeholder pet image at {PET_IMAGE_PATH}")
+        p = QPixmap(PET_SIZE, PET_SIZE)
+        p.fill(QColor("red"))
+        p.save(PET_IMAGE_PATH)
 
-    companion = PixelCompanion()
-    companion.show()
+    ctrl = Controller()
+    ctrl.show()
     sys.exit(app.exec_())
