@@ -6,8 +6,10 @@ import os
 import ctypes
 from collections import deque
 
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMenu
-from PyQt5.QtGui import QPixmap, QColor, QPainter, QFont, QBrush
+from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QMenu,
+                             QInputDialog, QMessageBox, QTextEdit, QDialog,
+                             QVBoxLayout, QDialogButtonBox, QAction)
+from PyQt5.QtGui import QPixmap, QColor, QPainter, QFont, QBrush, QClipboard
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSize, QThread, pyqtSignal
 
 # --- 配置 --- #
@@ -257,6 +259,14 @@ class Controller:
 
         self._pet_pos = self.pet.pos()
 
+        # 剪贴板历史
+        self._clipboard_history = deque(maxlen=10)
+        clipboard = QApplication.clipboard()
+        clipboard.dataChanged.connect(self._on_clipboard_changed)
+
+        # 便签存储路径
+        self._notes_path = os.path.join(BASE_DIR, "assets", "notes.txt")
+
         self.hook = HookListener()
         self.hook.key_signal.connect(self.key_panel.add_key)
         self.hook.move_signal.connect(self.overlay.add)
@@ -268,28 +278,117 @@ class Controller:
     def _on_pet_moved(self, pos):
         self._pet_pos = pos
 
+    def _on_clipboard_changed(self):
+        text = QApplication.clipboard().text()
+        if text and text not in self._clipboard_history:
+            self._clipboard_history.appendleft(text)
+
     def _show_menu(self, pos):
         overlay_was_visible = self.overlay.isVisible()
         if overlay_was_visible:
             self.overlay.hide()
 
         menu = QMenu()
+
+        # 粒子开关
         if self.overlay.enabled:
-            menu.addAction("Pause Particles", self._toggle)
+            menu.addAction("暂停粒子", self._toggle)
         else:
-            menu.addAction("Resume Particles", self._toggle)
+            menu.addAction("恢复粒子", self._toggle)
+
         menu.addSeparator()
-        menu.addAction("Exit", QApplication.quit)
+
+        # 剪贴板历史
+        cb_menu = menu.addMenu("剪贴板历史")
+        if self._clipboard_history:
+            for i, text in enumerate(self._clipboard_history):
+                snippet = text[:40] + "..." if len(text) > 40 else text
+                action = cb_menu.addAction(f"{i+1}. {snippet}")
+                action.setData(text)
+            cb_menu.addSeparator()
+            cb_menu.addAction("清除历史", self._clear_clipboard_history)
+        else:
+            cb_menu.addAction("(空)").setEnabled(False)
+
+        # 剪贴板子菜单点击处理
+        cb_menu.triggered.connect(self._on_clipboard_menu)
+
+        # 快捷便签
+        note_menu = menu.addMenu("快捷便签")
+        note_menu.addAction("查看便签", self._view_notes)
+        note_menu.addAction("添加便签", self._add_note)
+
+        # 快捷键说明
+        menu.addAction("快捷键说明", self._show_shortcuts)
+
+        menu.addSeparator()
+        menu.addAction("退出", QApplication.quit)
 
         menu.exec_(pos)
 
         if overlay_was_visible:
             self.overlay.show()
 
+    def _on_clipboard_menu(self, action):
+        text = action.data()
+        if isinstance(text, str):
+            QApplication.clipboard().setText(text)
+            self.key_panel.add_key("已复制")
+
+    def _clear_clipboard_history(self):
+        self._clipboard_history.clear()
+
     def _toggle(self):
         self.overlay.enabled = not self.overlay.enabled
-        s = "ON" if self.overlay.enabled else "OFF"
-        self.key_panel.add_key(f"Particles: {s}")
+        s = "开" if self.overlay.enabled else "关"
+        self.key_panel.add_key(f"粒子: {s}")
+
+    def _view_notes(self):
+        dlg = QDialog()
+        dlg.setWindowTitle("快捷便签")
+        dlg.setWindowFlags(Qt.WindowStaysOnTopHint)
+        dlg.resize(400, 300)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        if os.path.exists(self._notes_path):
+            with open(self._notes_path, "r", encoding="utf-8") as f:
+                text_edit.setText(f.read())
+        else:
+            text_edit.setText("(暂无便签)")
+
+        btn = QDialogButtonBox(QDialogButtonBox.Ok)
+        btn.accepted.connect(dlg.accept)
+
+        layout = QVBoxLayout()
+        layout.addWidget(text_edit)
+        layout.addWidget(btn)
+        dlg.setLayout(layout)
+        dlg.exec_()
+
+    def _add_note(self):
+        text, ok = QInputDialog.getMultiLineText(
+            None, "添加便签", "输入内容:",
+            flags=Qt.WindowStaysOnTopHint,
+        )
+        if ok and text:
+            timestamp = __import__('datetime').datetime.now().strftime("%m-%d %H:%M")
+            line = f"[{timestamp}] {text}\n"
+            os.makedirs(os.path.dirname(self._notes_path), exist_ok=True)
+            with open(self._notes_path, "a", encoding="utf-8") as f:
+                f.write(line)
+            self.key_panel.add_key("便签已存")
+
+    def _show_shortcuts(self):
+        QMessageBox.information(
+            None, "快捷键说明",
+            "左键点击宠物 → 弹出菜单\n"
+            "右键点击宠物 → 弹出菜单\n"
+            "拖拽宠物 → 移动位置\n"
+            "按键 → 显示在左侧面板\n"
+            "Ctrl+C → 自动记录剪贴板\n"
+            "鼠标移动 → 粒子拖尾",
+        )
 
     def _cleanup(self):
         self.hook.stop()
