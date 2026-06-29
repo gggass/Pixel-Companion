@@ -156,8 +156,10 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
             default: event_type = "mouse_event"; break;
         }
         
-        // 仅在鼠标移动或点击时输出，避免过多数据
-        if (wParam == WM_MOUSEMOVE || wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN) {
+        // 输出所有鼠标事件（抬起事件用于拖拽结束检测）
+        if (wParam == WM_MOUSEMOVE || wParam == WM_LBUTTONDOWN || wParam == WM_LBUTTONUP ||
+            wParam == WM_RBUTTONDOWN || wParam == WM_RBUTTONUP ||
+            wParam == WM_MBUTTONDOWN || wParam == WM_MBUTTONUP) {
             std::cout << "{\"event_type\": \"" << event_type << "\", \"x\": " << pMSLLHookStruct->pt.x << ", \"y\": " << pMSLLHookStruct->pt.y << "}" << std::endl;
         }
     }
