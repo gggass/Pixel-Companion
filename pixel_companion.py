@@ -236,12 +236,14 @@ class PixelCompanion(QWidget):
 
     # ---------- 粒子更新 ----------
     def update_particles(self):
-        if self.mouse_effect_enabled:
-            for p in list(self.particles):
-                p.update()
-                if p.alpha <= 0:
-                    self.particles.remove(p)
-            self.update()
+        """始终让粒子淡出消失，开关只控制新粒子创建"""
+        if not self.particles:
+            return
+        for p in list(self.particles):
+            p.update()
+            if p.alpha <= 0:
+                self.particles.remove(p)
+        self.update()
 
     # ---------- 绘制 ----------
     def paintEvent(self, event):
