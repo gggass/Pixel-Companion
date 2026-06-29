@@ -220,6 +220,13 @@ class PetWindow(QWidget):
 
         self._drag_pos = None
 
+    def set_image(self, path):
+        pix = QPixmap(path)
+        if pix.isNull():
+            return
+        self._pixmap = pix.scaled(PET_SIZE, PET_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -267,6 +274,9 @@ class Controller:
         # 便签存储路径
         self._notes_path = os.path.join(BASE_DIR, "assets", "notes.txt")
 
+        # 可切换角色列表
+        self._pets = self._scan_pets()
+
         self.hook = HookListener()
         self.hook.key_signal.connect(self.key_panel.add_key)
         self.hook.move_signal.connect(self.overlay.add)
@@ -277,6 +287,16 @@ class Controller:
 
     def _on_pet_moved(self, pos):
         self._pet_pos = pos
+
+    def _scan_pets(self):
+        """扫描所有可用角色"""
+        pets = [PET_IMAGE_PATH]  # 默认角色
+        pet_dir = os.path.join(BASE_DIR, "assets", "pets")
+        if os.path.isdir(pet_dir):
+            for f in sorted(os.listdir(pet_dir)):
+                if f.endswith(".png"):
+                    pets.append(os.path.join(pet_dir, f))
+        return pets
 
     def _on_clipboard_changed(self):
         text = QApplication.clipboard().text()
@@ -318,6 +338,18 @@ class Controller:
         note_menu.addAction("查看便签", self._view_notes)
         note_menu.addAction("添加便签", self._add_note)
 
+        # 切换角色
+        pet_menu = menu.addMenu("切换角色")
+        for pet_path in self._pets:
+            name = os.path.splitext(os.path.basename(pet_path))[0]
+            # 翻译名称
+            name_cn = {"pixel_pet": "紫发娘", "blonde": "金发娘",
+                       "catgirl": "猫耳娘", "twin": "双马尾", "witch": "小魔女"}
+            display = name_cn.get(name, name)
+            action = pet_menu.addAction(display)
+            action.setData(pet_path)
+        pet_menu.triggered.connect(self._on_pet_select)
+
         # 快捷键说明
         menu.addAction("快捷键说明", self._show_shortcuts)
 
@@ -334,6 +366,15 @@ class Controller:
         if isinstance(text, str):
             QApplication.clipboard().setText(text)
             self.key_panel.add_key("已复制")
+
+    def _on_pet_select(self, action):
+        path = action.data()
+        if isinstance(path, str) and os.path.exists(path):
+            self.pet.set_image(path)
+            name = os.path.splitext(os.path.basename(path))[0]
+            name_cn = {"pixel_pet": "紫发娘", "blonde": "金发娘",
+                       "catgirl": "猫耳娘", "twin": "双马尾", "witch": "小魔女"}
+            self.key_panel.add_key(name_cn.get(name, name))
 
     def _clear_clipboard_history(self):
         self._clipboard_history.clear()
