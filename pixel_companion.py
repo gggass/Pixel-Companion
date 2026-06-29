@@ -224,15 +224,23 @@ class Controller:
         app.aboutToQuit.connect(self._cleanup)
 
     def _show_menu(self, pos):
+        # 菜单弹出时暂时隐藏覆盖层，确保菜单不被遮挡
+        overlay_was_visible = self.overlay.isVisible()
+        if overlay_was_visible:
+            self.overlay.hide()
+
         menu = QMenu()
-        menu.setWindowFlags(menu.windowFlags() | Qt.WindowStaysOnTopHint)
         if self.overlay.enabled:
             menu.addAction("Pause Particles", self._toggle)
         else:
             menu.addAction("Resume Particles", self._toggle)
         menu.addSeparator()
         menu.addAction("Exit", QApplication.quit)
-        menu.popup(pos)
+
+        menu.exec_(pos)
+
+        if overlay_was_visible:
+            self.overlay.show()
 
     def _toggle(self):
         self.overlay.enabled = not self.overlay.enabled
