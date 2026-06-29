@@ -90,9 +90,9 @@ class HookListener(QThread):
 class ParticleOverlay(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setGeometry(QApplication.desktop().availableGeometry())
 
         self.particles = deque()
@@ -245,6 +245,9 @@ class Controller:
     def show(self):
         self.overlay.show()
         self.pet.show()
+        # 确保宠物窗口在粒子覆盖层之上
+        self.pet.raise_()
+        self.pet.activateWindow()
 
 
 if __name__ == "__main__":
