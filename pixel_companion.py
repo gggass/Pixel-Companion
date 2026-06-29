@@ -6,7 +6,7 @@ import os
 import ctypes
 from collections import deque
 
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QMenu, QAction
 from PyQt5.QtGui import QPixmap, QColor, QPainter, QFont, QBrush
 from PyQt5.QtCore import Qt, QTimer, QPoint, QRect, QSize, QThread, pyqtSignal
 
@@ -235,10 +235,28 @@ class PixelCompanion(QWidget):
                 self.dragging = False
                 self.drag_start_pos = QPoint()
 
+        elif event_type == "mouse_right_down":
+            if self.pet_rect().contains(x, y):
+                self._show_context_menu(QPoint(x, y))
+
     def _toggle_mouse_effect(self):
         self.mouse_effect_enabled = not self.mouse_effect_enabled
         status = "ON" if self.mouse_effect_enabled else "OFF"
         self.show_key_on_pet(f"Particles: {status}")
+
+    def _show_context_menu(self, pos):
+        """右键菜单：关闭程序 / 切换粒子"""
+        menu = QMenu()
+
+        label = "Particles: OFF" if self.mouse_effect_enabled else "Particles: ON"
+        toggle_action = QAction(label, menu)
+        toggle_action.triggered.connect(self._toggle_mouse_effect)
+        menu.addAction(toggle_action)
+
+        menu.addSeparator()
+        menu.addAction("Exit", self.close)
+
+        menu.popup(pos)
 
     # ---------- 粒子更新 ----------
     def update_particles(self):
