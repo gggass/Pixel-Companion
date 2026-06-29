@@ -3,6 +3,7 @@ import json
 import subprocess
 import random
 import os
+import ctypes
 from collections import deque
 
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel
@@ -107,10 +108,12 @@ class PixelCompanion(QWidget):
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # 先用 Qt 属性，showEvent 里再用 Win32 API 加固
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         screen = QApplication.desktop().availableGeometry()
         self.setGeometry(screen)
+        self._click_through_set = False
 
         # 加载宠物图片
         self.pet_pixmap = QPixmap(PET_IMAGE_PATH)
@@ -249,6 +252,39 @@ class PixelCompanion(QWidget):
 
         # 宠物
         painter.drawPixmap(self.pet_pos.x(), self.pet_pos.y(), self.pet_pixmap)
+
+    def showEvent(self, event):
+        """窗口显示后，通过 Win32 API 强制设置鼠标穿透"""
+        super().showEvent(event)
+        if not self._click_through_set:
+            self._enable_click_through()
+
+    def _enable_click_through(self):
+        """用 Win32 SetWindowLongPtr 设置 WS_EX_TRANSPARENT，比 Qt 属性更可靠"""
+        try:
+            hwnd = int(self.winId())
+            GWL_EXSTYLE = -20
+            WS_EX_TRANSPARENT = 0x00000020
+            WS_EX_LAYERED = 0x00080000
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_TOPMOST = 0x00000008
+
+            user32 = ctypes.windll.user32
+            ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+            ex_style |= WS_EX_TRANSPARENT | WS_EX_LAYERED
+            user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style)
+            # 刷新窗口框架使样式生效
+            SWP_FRAMECHANGED = 0x0020
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, 0, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+            )
+            self._click_through_set = True
+        except Exception as e:
+            print(f"Failed to enable click-through: {e}")
 
     # ---------- 退出 ----------
     def closeEvent(self, event):
