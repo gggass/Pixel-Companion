@@ -188,6 +188,7 @@ class PetWindow(QWidget):
         p.drawPixmap(0, 0, self._pixmap)
 
     def mousePressEvent(self, e):
+        self.show_key("click")  # debug: 确认收到点击
         if e.button() == Qt.LeftButton:
             self._drag_pos = e.globalPos()
         elif e.button() == Qt.RightButton:
