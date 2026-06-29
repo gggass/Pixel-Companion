@@ -233,4 +233,4 @@ if __name__ == "__main__":
 
     companion = PixelCompanion()
     companion.show()
-    sys.exit(app.exec_()))
+    sys.exit(app.exec_())
