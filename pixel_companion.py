@@ -231,32 +231,32 @@ class PixelCompanion(QWidget):
                 dx = x - self.drag_start_pos.x()
                 dy = y - self.drag_start_pos.y()
                 if (dx * dx + dy * dy) < 25:  # 移动距离 < 5px
-                    self._toggle_mouse_effect()
+                    self._show_menu(QPoint(x, y))
                 self.dragging = False
                 self.drag_start_pos = QPoint()
 
         elif event_type == "mouse_right_down":
             if self.pet_rect().contains(x, y):
-                self._show_context_menu(QPoint(x, y))
+                self._show_menu(QPoint(x, y))
 
-    def _toggle_mouse_effect(self):
-        self.mouse_effect_enabled = not self.mouse_effect_enabled
-        status = "ON" if self.mouse_effect_enabled else "OFF"
-        self.show_key_on_pet(f"Particles: {status}")
-
-    def _show_context_menu(self, pos):
-        """右键菜单：关闭程序 / 切换粒子"""
+    def _show_menu(self, pos):
+        """点击宠物弹出菜单"""
         menu = QMenu()
 
-        label = "Particles: OFF" if self.mouse_effect_enabled else "Particles: ON"
-        toggle_action = QAction(label, menu)
-        toggle_action.triggered.connect(self._toggle_mouse_effect)
-        menu.addAction(toggle_action)
+        if self.mouse_effect_enabled:
+            menu.addAction("Pause Particles", self._toggle_particles)
+        else:
+            menu.addAction("Resume Particles", self._toggle_particles)
 
         menu.addSeparator()
         menu.addAction("Exit", self.close)
 
         menu.popup(pos)
+
+    def _toggle_particles(self):
+        self.mouse_effect_enabled = not self.mouse_effect_enabled
+        status = "ON" if self.mouse_effect_enabled else "OFF"
+        self.show_key_on_pet(f"Particles: {status}")
 
     # ---------- 粒子更新 ----------
     def update_particles(self):
