@@ -199,15 +199,16 @@ class PetWindow(QWidget):
         timer.start(KEY_DISPLAY_DURATION)
 
     def _layout_key_labels(self):
-        """从上到下排列所有按键标签"""
-        y_offset = -10
-        for label, _ in self._key_labels:
+        """从下到上排列所有按键标签（在窗口内部）"""
+        y_offset = PET_SIZE - 10
+        for label, _ in reversed(self._key_labels):
             label.adjustSize()
+            y_offset -= label.height()
             label.move(
                 (PET_SIZE - label.width()) // 2,
-                y_offset - label.height(),
+                y_offset,
             )
-            y_offset -= label.height() + 4
+            y_offset -= 4
 
     def paintEvent(self, event):
         p = QPainter(self)
