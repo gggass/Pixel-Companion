@@ -160,27 +160,54 @@ class PetWindow(QWidget):
             pix = pix.scaled(PET_SIZE, PET_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._pixmap = pix
 
-        self._key_label = QLabel(self)
-        self._key_label.setAlignment(Qt.AlignCenter)
-        self._key_label.setStyleSheet(
-            "background-color: rgba(0,0,0,180); color: white; border-radius: 5px; padding: 5px;"
-        )
-        self._key_label.setFont(QFont("Arial", 10, QFont.Bold))
-        self._key_label.hide()
-        self._key_timer = QTimer(self)
-        self._key_timer.timeout.connect(self._key_label.hide)
-
+        # 按键队列：每个按键一个独立标签，堆叠在宠物上方
+        self._key_labels = []  # [(QLabel, QTimer), ...]
         self._drag_pos = None
 
     def show_key(self, text):
-        self._key_label.setText(text)
-        self._key_label.adjustSize()
-        self._key_label.move(
-            (PET_SIZE - self._key_label.width()) // 2,
-            -self._key_label.height() - 10,
+        """添加按键到队列顶部，旧键下移，到时自动消失"""
+        label = QLabel(text, self)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet(
+            "background-color: rgba(0,0,0,180); color: white; border-radius: 5px; padding: 5px;"
         )
-        self._key_label.show()
-        self._key_timer.start(KEY_DISPLAY_DURATION)
+        label.setFont(QFont("Arial", 10, QFont.Bold))
+        label.adjustSize()
+        label.show()
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+
+        entry = (label, timer)
+        self._key_labels.insert(0, entry)  # 新键插入顶部
+
+        # 限制队列长度
+        while len(self._key_labels) > 5:
+            old_label, old_timer = self._key_labels.pop()
+            old_timer.stop()
+            old_label.deleteLater()
+
+        self._layout_key_labels()
+
+        # 定时移除
+        def remove():
+            if entry in self._key_labels:
+                self._key_labels.remove(entry)
+                label.deleteLater()
+                self._layout_key_labels()
+        timer.timeout.connect(remove)
+        timer.start(KEY_DISPLAY_DURATION)
+
+    def _layout_key_labels(self):
+        """从上到下排列所有按键标签"""
+        y_offset = -10
+        for label, _ in self._key_labels:
+            label.adjustSize()
+            label.move(
+                (PET_SIZE - label.width()) // 2,
+                y_offset - label.height(),
+            )
+            y_offset -= label.height() + 4
 
     def paintEvent(self, event):
         p = QPainter(self)
