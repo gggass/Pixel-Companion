@@ -157,8 +157,11 @@ class KeyPanel(QWidget):
         label = QLabel(text, self)
         label.setAlignment(Qt.AlignCenter)
         label.setStyleSheet(
-            "color: white; background-color: rgba(0,0,0,160);"
-            "border-radius: 4px; padding: 3px 6px;"
+            "color: #FFFFFF;"
+            "background-color: rgba(255, 255, 255, 40);"  # 半透明玻璃感
+            "border: 1px solid rgba(255, 255, 255, 60);" # 细微边框增强质感
+            "border-radius: 10px;"                        # 更圆润的气泡感
+            "padding: 5px 10px;"
         )
         label.setFont(QFont("Arial", 10, QFont.Bold))
         label.adjustSize()
